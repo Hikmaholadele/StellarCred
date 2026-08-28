@@ -83,7 +83,7 @@ jobs:
         run: |
           set -euo pipefail
           export PATH="$HOME/.nargo/bin:$PATH"
-          for dir in circuits/*/; do
+          for dir in */; do
             [ -f "$dir/Nargo.toml" ] || continue
             grep -q '^type = "bin"' "$dir/Nargo.toml" || continue
             echo "=== nargo compile: $dir"
@@ -95,7 +95,7 @@ jobs:
         run: |
           set -euo pipefail
           export PATH="$HOME/.nargo/bin:$PATH"
-          for dir in circuits/*/; do
+          for dir in */; do
             [ -f "$dir/Nargo.toml" ] || continue
             echo "=== nargo test: $dir"
             (cd "$dir" && nargo test)
@@ -104,7 +104,8 @@ jobs:
       # The committed artifacts under frontend/public/circuits/<type>.json are
       # what build.sh stages (circuits/scripts/build.sh maps <crate> ->
       # <type>.json by stripping the _proof suffix). nargo writes compiled
-      # programs to the workspace-level circuits/target/<package>.json.
+      # programs to the workspace-level target/<package>.json (relative to
+      # the circuits/ workspace root).
       # A raw byte diff is not stable across machines because nargo embeds
       # absolute source paths into `file_map`/`debug_symbols`, and its `hash`
       # covers those machine-specific fields too (verified locally: bytecode,
@@ -119,8 +120,8 @@ jobs:
           # range_proof compiles but has no frontend artifact yet.
           for crate in commit commit3 kyc_proof age_proof income_proof jurisdiction_proof funds_proof accreditation_proof employment_proof aggregate_proof; do
             type="${crate%_proof}"
-            committed="frontend/public/circuits/${type}.json"
-            fresh="circuits/target/${crate}.json"
+            committed="../frontend/public/circuits/${type}.json"
+            fresh="target/${crate}.json"
 
             if [ ! -f "$fresh" ]; then
               echo "::error file=$crate::no fresh compilation output at $fresh"
