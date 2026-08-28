@@ -46,19 +46,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache nargo toolchain and git dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.nargo
-          key: nargo-${{ runner.os }}-${{ env.NOIR_VERSION }}-${{ hashFiles('circuits/**/Nargo.toml') }}
+      # Do NOT cache ~/.nargo: it contains both the noirup launcher and the
+      # nargo binary.  When the cache restores an old ~/.nargo the noirup
+      # install script detects the existing toolchain and skips re-downloading
+      # nargo, leaving the job with a stale or missing binary.  A fresh
+      # install every run is fast (~10 s) and eliminates this class of bug.
 
-      - name: Install nargo ${{ env.NOIR_VERSION }}
+      - name: Install noirup
+        shell: bash
         run: |
-          curl -L https://raw.githubusercontent.com/noir-lang/noirup/main/install | bash -s -- -v "$NOIR_VERSION"
+          curl -L https://raw.githubusercontent.com/noir-lang/noirup/main/install | bash
           echo "$HOME/.nargo/bin" >> "$GITHUB_PATH"
 
-      - name: Check nargo version
+      - name: Install nargo ${{ env.NOIR_VERSION }}
+        shell: bash
         run: |
+          export PATH="$HOME/.nargo/bin:$PATH"
+          noirup -v "$NOIR_VERSION"
+          nargo --version
+
+      - name: Check nargo version
+        shell: bash
+        run: |
+          export PATH="$HOME/.nargo/bin:$PATH"
           nargo --version
           nargo --version | grep -F "${NOIR_VERSION}" || {
             echo "::error::expected nargo ${NOIR_VERSION}"
@@ -69,8 +79,10 @@ jobs:
       # Only `type = "bin"` crates produce compilable programs; `lib` crates are
       # exercised by `nargo test` below instead.
       - name: Compile circuit crates
+        shell: bash
         run: |
           set -euo pipefail
+          export PATH="$HOME/.nargo/bin:$PATH"
           for dir in circuits/*/; do
             [ -f "$dir/Nargo.toml" ] || continue
             grep -q '^type = "bin"' "$dir/Nargo.toml" || continue
@@ -79,8 +91,10 @@ jobs:
           done
 
       - name: Run circuit tests
+        shell: bash
         run: |
           set -euo pipefail
+          export PATH="$HOME/.nargo/bin:$PATH"
           for dir in circuits/*/; do
             [ -f "$dir/Nargo.toml" ] || continue
             echo "=== nargo test: $dir"
