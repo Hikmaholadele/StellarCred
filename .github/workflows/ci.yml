@@ -27,7 +27,7 @@ jobs:
           npx --yes -p @commitlint/cli -p @commitlint/config-conventional commitlint \
             --from ${{ github.event.pull_request.base.sha }} \
             --to ${{ github.event.pull_request.head.sha }} \
-            --no-merge \
+            --git-log-args="--no-merges" \
             --verbose
 
   contracts:
