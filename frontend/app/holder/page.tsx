@@ -8,7 +8,10 @@ import {
   IconCertificate,
   IconPlus,
   IconDownload,
+  IconChartBar,
 } from "@tabler/icons-react";
+import SubmissionHistory from "@/components/SubmissionHistory";
+import { saveSubmission } from "@/lib/history";
 import { WalletButton } from "@/components/WalletButton";
 import { useWallet, usePreviewMode } from "@/lib/wallet-context";
 import { ConfigBanner } from "@/components/ConfigBanner";
@@ -27,8 +30,10 @@ const TransferImportModal = dynamic(
   () => import("@/components/TransferImportModal").then((m) => m.TransferImportModal),
   { ssr: false },
 );
-
-// Extracted hooks
+const ProofPerfPanel = dynamic(
+  () => import("@/components/ProofPerfPanel").then((m) => m.ProofPerfPanel),
+  { ssr: false },
+);
 import { useCredentialStore } from "@/lib/hooks/useCredentialStore";
 import { useBatchSelection } from "@/lib/hooks/useBatchSelection";
 import { useImportExport } from "@/lib/hooks/useImportExport";
@@ -37,8 +42,6 @@ import {
   isExpiringSoon,
   daysRemaining,
 } from "@/lib/proof-helpers";
-
-// Extracted subcomponents
 import { SectionLabel } from "@/components/holder/SectionLabel";
 import { CredCard } from "@/components/holder/CredCard";
 import { BatchBar } from "@/components/holder/BatchBar";
@@ -46,20 +49,14 @@ import { ImportPanel } from "@/components/holder/ImportPanel";
 import { ProofFlowView } from "@/components/holder/ProofFlowView";
 import { BatchProofFlowView } from "@/components/holder/BatchProofFlowView";
 import { SponsorBanner } from "@/components/holder/SponsorBanner";
-
-// Sponsored submission
+import { GuardianRecoveryControl } from "@/components/holder/GuardianRecoveryControl";
 import { isSponsorAvailable, submitSponsoredProof } from "@/lib/sponsor";
 import { submitProof } from "@/lib/contracts";
-
-// ── Page view state ───────────────────────────────────────────────────────────
 
 type PageView =
   | { kind: "list" }
   | { kind: "single"; cred: Credential }
   | { kind: "batch"; creds: Credential[] };
-
-// ── Holder page (thin orchestrator) ───────────────────────────────────────────
-// All state management lives in hooks; all UI lives in subcomponents.
 
 function HolderInner() {
   const { address, connect } = useWallet();
@@ -68,10 +65,9 @@ function HolderInner() {
   const searchParams = useSearchParams();
   const toast = useToast();
 
-  // ── Hooks ──────────────────────────────────────────────────────────────────
-
   const {
     creds,
+    reload: reloadCreds,
     save: saveCred,
     remove: removeCred,
     markCredentialProved,
@@ -98,15 +94,12 @@ function HolderInner() {
     clearSelection,
   } = useBatchSelection(unprovedAll, address, handleError);
 
-  // ── Local UI state ─────────────────────────────────────────────────────────
-
   const [view, setView] = useState<PageView>({ kind: "list" });
   const [importing, setImporting] = useState(false);
   const [detailCred, setDetailCred] = useState<Credential | null>(null);
   const [transferCred, setTransferCred] = useState<Credential | null>(null);
   const [importPayload, setImportPayload] = useState<string | null>(null);
-
-  // ── QR transfer import ─────────────────────────────────────────────────────
+  const [showPerf, setShowPerf] = useState(false);
 
   useEffect(() => {
     const payload = searchParams.get(IMPORT_PARAM);
@@ -114,8 +107,6 @@ function HolderInner() {
     setImportPayload(payload);
     router.replace("/holder");
   }, [searchParams, router]);
-
-  // ── Derived data ───────────────────────────────────────────────────────────
 
   const displayCreds = isPreview ? PREVIEW_CREDENTIALS : creds;
   const unproved = displayCreds.filter((c) => proofStatus(c) === "unproved");
@@ -125,11 +116,7 @@ function HolderInner() {
   const activeProved = displayCreds.filter((c) => proofStatus(c) === "proved" && !isExpiringSoon(c, 7));
   const expired = displayCreds.filter((c) => proofStatus(c) === "expired");
 
-  // ── Sponsor-aware submission ────────────────────────────────────────────────
-
   const singleSubmitFn = isSponsorAvailable() ? submitSponsoredProof : submitProof;
-
-  // ── Handlers ───────────────────────────────────────────────────────────────
 
   const handleProveSingle = useCallback(
     (cred: Credential) => setView({ kind: "single", cred }),
@@ -140,6 +127,12 @@ function HolderInner() {
     (txHash: string) => {
       if (view.kind === "single") {
         markCredentialProved(view.cred.commitment, txHash);
+        saveSubmission({
+          credentialType: view.cred.type,
+          timestamp: Date.now(),
+          txHash,
+          status: "confirmed",
+        });
       }
       setView({ kind: "list" });
     },
@@ -159,8 +152,6 @@ function HolderInner() {
     [markCredentialsProved],
   );
 
-  // ── Render ─────────────────────────────────────────────────────────────────
-
   return (
     <>
       <div className="between" style={{ marginBottom: "2.5rem" }}>
@@ -169,19 +160,26 @@ function HolderInner() {
           <h1 style={{ fontSize: "2rem", marginTop: "0.35rem" }}>Your credentials</h1>
         </div>
         <div className="row" style={{ gap: "0.75rem" }}>
-          {/* Selective disclosure presets (#386): a named, shareable bundle
-              of several claim types — defined and shared from its own page
-              rather than crowding this one, but linked from here since the
-              issue asks for the entry point to live on the holder page. */}
           <a href="/presets" className="btn btn-secondary">
             Presets
           </a>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => setShowPerf((v) => !v)}
+            title="Proving performance &amp; telemetry debug view"
+            aria-expanded={showPerf}
+          >
+            <IconChartBar size={14} />
+            {showPerf ? "Hide perf" : "Perf"}
+          </button>
           <WalletButton />
         </div>
       </div>
 
       <ConfigBanner />
       <SponsorBanner />
+
+      {showPerf && <ProofPerfPanel />}
 
       {isPreview && (
         <div
@@ -223,7 +221,6 @@ function HolderInner() {
         />
       ) : (
         <div className="stack reveal" style={{ gap: "1.5rem" }}>
-          {/* ── Expiry Warning Banner ── */}
           {(expiringSoon.length > 0 || expired.length > 0) && (
             <div
               role="status"
@@ -262,7 +259,6 @@ function HolderInner() {
             </div>
           )}
 
-          {/* ── Empty state ── */}
           {creds.length === 0 && !importing && (
             <div className="card" style={{ textAlign: "center", padding: "3.5rem 1.5rem", borderStyle: "dashed" }}>
               <IconCertificate size={30} stroke={1.3} color="var(--faint)" />
@@ -282,7 +278,6 @@ function HolderInner() {
             </div>
           )}
 
-          {/* ── Expiring Soon (Action Recommended) ── */}
           {expiringSoon.length > 0 && (
             <div className="stack" style={{ gap: "0.6rem" }}>
               <SectionLabel>Expiring soon &middot; Re-prove recommended</SectionLabel>
@@ -300,7 +295,6 @@ function HolderInner() {
             </div>
           )}
 
-          {/* ── Expired (Action Required) ── */}
           {expired.length > 0 && (
             <div className="stack" style={{ gap: "0.6rem" }}>
               <SectionLabel>Expired proofs &middot; Re-prove required</SectionLabel>
@@ -318,7 +312,6 @@ function HolderInner() {
             </div>
           )}
 
-          {/* ── Credentials to prove ── */}
           {unproved.length > 0 && (
             <div className="stack" style={{ gap: "0.6rem" }}>
               <SectionLabel>Ready to prove</SectionLabel>
@@ -345,7 +338,6 @@ function HolderInner() {
             </div>
           )}
 
-          {/* ── Active proved ── */}
           {activeProved.length > 0 && (
             <div className="stack" style={{ gap: "0.6rem" }}>
               <SectionLabel>On-chain &middot; active proofs</SectionLabel>
@@ -368,7 +360,8 @@ function HolderInner() {
             </p>
           )}
 
-          {/* ── Import / Export ── */}
+          <SubmissionHistory />
+
           {importing ? (
             <ImportPanel
               onImport={(c) => { saveCred(c); setImporting(false); }}
@@ -388,10 +381,24 @@ function HolderInner() {
                 >
                   <IconDownload size={14} /> Export backup
                 </button>
+                <GuardianRecoveryControl
+                  hasCredentials={creds.length > 0}
+                  onRestored={(recovered) => {
+                    reloadCreds();
+                    toast.success(
+                      `Successfully restored ${recovered.length} credential${recovered.length === 1 ? "" : "s"}`,
+                    );
+                  }}
+                />
               </div>
               <p className="faint" style={{ fontSize: "0.75rem", maxWidth: 560, lineHeight: 1.6, margin: 0 }}>
-                Credentials live only in this browser (localStorage). Export a backup before clearing site data.{" "}
-                <Link href="/docs#storage" style={{ color: "var(--accent)", textDecoration: "underline" }}>
+                Credentials live only in this browser (localStorage) — export a backup
+                or set up <strong>Guardian recovery</strong> (Shamir Secret Sharing) before
+                clearing site data or switching devices.{" "}
+                <Link
+                  href="/docs#storage"
+                  style={{ color: "var(--accent)", textDecoration: "underline" }}
+                >
                   Where your credentials live
                 </Link>
               </p>
@@ -419,6 +426,7 @@ function HolderInner() {
           onClose={() => setImportPayload(null)}
         />
       )}
+
     </>
   );
 }
